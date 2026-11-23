@@ -58,9 +58,14 @@ A board made from these files would have the following faults:
 
 **Why DRC did not catch it.** In this project's Board Setup, the `net_conflict` check ("Pad net doesn't match schematic") is set to *Warning*. A DRC run with "Test for parity between PCB and schematic" enabled does list all nine pads, but only under warnings. If you look only at errors, the board appears clean.
 
-### 2. Q3 in the auto-program circuit is wired backwards
+### 2. Automatic reset and download mode do not work
 
-Q3 (BC817) is one of the two transistors that let the USB-UART bridge put the ESP32-C3 into download mode. In this version, the schematic and PCB connect Q3's emitter to BOOT and its collector to DTR, which is the reverse of Q2 and of Espressif's reference circuit. Automatic entry into download mode is therefore unreliable. You can still enter it manually with the Boot and Reset buttons.
+The auto-program circuit (Q2, Q3, R33, R34) is meant to let the CP2102N's DTR and RTS signals reset the ESP32-C3 and put it into download mode, so that you can upload firmware without pressing any buttons. It has two faults in this version:
+
+1. **Q3 is wired backwards.** The schematic and PCB connect Q3's emitter to BOOT and its collector to DTR, which is the reverse of Q2 and of Espressif's reference circuit.
+2. **The CP2102N has no DTR output.** This design uses the 20-pin QFN package of the CP2102N, which has no DTR pin. The net named DTR is connected to U4 pin 15, which is CTS, an input (see table 5.3 of the CP2102N datasheet in `Datasheets/`). Nothing drives the DTR net.
+
+Neither automatic reset nor automatic download mode can be relied on. DRC cannot detect either fault, because the schematic and PCB agree with each other. See [Uploading firmware](#uploading-firmware) for two ways to program the board anyway.
 
 ### 3. The microphone output is on an ADC2 pin
 
@@ -70,15 +75,15 @@ The MAX4466 output (MIC_OUT) is connected to GPIO5, the only ADC2 pin on the ESP
 
 The Gerbers (`ESP32PRoject_Gerber/` and `ESP32PRoject_Gerber.zip`) and the placement files (`*.pos`) were generated from this faulty PCB. They are kept for reference only.
 
-## How iteration 2 fixes these issues
+## Status of these issues in iteration 2
 
-Iteration 2 fixes all three issues:
+Iteration 2 fixes issues 1 and 3. Issue 2 is only partly fixed:
 
-| Issue | Fix in iteration 2 |
+| Issue | Status in iteration 2 |
 |---|---|
-| 1. PCB out of sync | The PCB was updated from the schematic. All nine pads are now on their correct nets, the +3.3V tracks to them were removed, and the GND pads, D- and VBUS sense were rerouted. The via under U4's exposed pad now connects to GND. A DRC with schematic parity reports no conflicts on these parts. |
-| 2. Q3 backwards | Q3's collector now connects to BOOT and its emitter to DTR, matching Q2 and the Espressif reference circuit. |
-| 3. Microphone on ADC2 | MIC_OUT moved from GPIO5 to GPIO0 (ADC1), and CS_SD moved to GPIO5. |
+| 1. PCB out of sync | **Fixed.** The PCB was updated from the schematic. All nine pads are now on their correct nets, the +3.3V tracks to them were removed, and the GND pads, D- and VBUS sense were rerouted. The via under U4's exposed pad now connects to GND. A DRC with schematic parity reports no conflicts on these parts. |
+| 2. Auto-program circuit | **Partly fixed, still not working.** Q3's collector now connects to BOOT and its emitter to DTR, matching Q2 and the Espressif reference circuit. DTR is still connected to the CP2102N's CTS input, so automatic reset and download mode still do not work. I have not yet decided whether to change this. The methods under [Uploading firmware](#uploading-firmware) work on both iterations. |
+| 3. Microphone on ADC2 | **Fixed.** MIC_OUT moved from GPIO5 to GPIO0 (ADC1), and CS_SD moved to GPIO5. |
 
 Iteration 2 also includes some improvements that were not fixes for errors:
 
@@ -99,7 +104,14 @@ If you want to repair iteration 1 as an exercise, I have recorded a short video 
 3. Route GND to U4 pads 3, 12 and 21, U2 pads 5 and 7, and C15 pad 2. Route D- from U4 pad 5 to U5 pad 1 as a differential pair with D+, and connect U4 pad 8 to the VBUS sense divider (R12, R13, C11).
 4. Run DRC with **Test for parity between PCB and schematic** enabled, and check the warnings as well as the errors. You can also set `net_conflict` to *Error* in Board Setup → Design Rules → Violation Severity.
 
-Issues 2 and 3 are design changes. To fix them, edit the schematic as described in the table above, then repeat steps 1 to 4.
+Issue 3 and the Q3 part of issue 2 are design changes. To fix them, edit the schematic as described in the table above, then repeat steps 1 to 4. The DTR problem cannot be fixed this way, because the 20-pin CP2102N has no DTR pin.
+
+## Uploading firmware
+
+Because automatic reset and download mode do not work, use one of these two methods to upload firmware. Both work on iteration 1 and iteration 2:
+
+1. **Through the USB-C connector and the CP2102N, with the buttons.** Hold **Boot** (S1), press and release **Reset** (S2), then release **Boot**. The ESP32-C3 starts in download mode and you can upload. Press **Reset** afterwards to run the new firmware. Serial monitoring through the CP2102N works normally.
+2. **Through the ESP32-C3's built-in USB Serial/JTAG controller.** The ESP32-C3 has its own USB interface on GPIO18 (D-) and GPIO19 (D+). On this board these pins are brought out to header **J5**: pin 3 is D-, pin 4 is D+ and pin 5 is GND. Wire a USB cable's D-, D+ and GND to those pins and power the board from the USB-C connector or the battery. **Do not connect the cable's 5 V wire to J5**: J5 pin 1 is the 3.3 V rail. Through this interface, esptool and the Arduino and ESP-IDF tools can reset the chip and enter download mode without the buttons, and you get a serial console and JTAG debugging as well. For this to keep working, your firmware must not use GPIO18 and GPIO19 as ordinary I/O.
 
 ## License
 
